@@ -1,0 +1,53 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>PixelProTech Gatekeeper — demo prototype</title>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="favicon.ico" sizes="any"><link rel="apple-touch-icon" href="apple-touch-icon.png"><meta name="theme-color" content="#07070a"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Gatekeeper"></head><body>
+<header><div class="brand"><h1>PixelProTech Gatekeeper</h1><small>PixelProTech Solutions (Pty) Ltd · Reg 2026/622131/07</small></div>
+<nav role="tablist"><button role="tab" data-t="kiosk" aria-selected="true">Reception kiosk</button><button role="tab" data-t="console" aria-selected="false">Security console</button><button role="tab" data-t="blueprint" aria-selected="false">Blueprint</button></nav></header>
+<div class="banner"><b>Prototype.</b> Runs in this browser only; nothing is saved or sent anywhere. Face and voice verification, door controllers, automatic notifications, MFA and the database are <b>not connected</b>, so identity checks are done by staff.</div>
+<main>
+<section id="kiosk"><div class="kiosk"><h2 id="kt">Welcome to PixelProTech</h2><div class="msg" id="km"></div><div id="kb"></div></div>
+<p class="mu" style="text-align:center;max-width:620px;margin:12px auto">Employees must be enrolled first (Security console, Enrol employee). Spoken-code entry is not connected; the keypad is the input method.</p></section>
+
+<section id="console" class="hide">
+<div class="row"><label>Acting as <select id="role"></select></label><input id="dmd" class="hide" placeholder="Managed department" aria-label="Managed department"><label><input type="checkbox" id="tm"> Test mode: 1 s = 1 min</label><span class="mu" id="rn"></span></div>
+<div class="stats" id="stats"></div>
+<div class="grid">
+<div class="panel" data-r="SA HR"><h2>Enrol employee</h2><div class="row"><input id="enn" placeholder="Full registered name" aria-label="Full name"><input id="end" placeholder="Department" aria-label="Department"><input id="enc" placeholder="Code (blank = generate)" inputmode="numeric" maxlength="4" aria-label="Employee code"><button class="btn primary sm" id="en">Enrol</button></div><p class="mu" id="enm">Records live in this browser tab only and are lost on reload. Do not enter real personal data until the backend and POPIA assessment are in place.</p></div>
+<div class="panel" data-r="SA SO RC DM"><h2>Occupancy and roll-call</h2><p class="mu">Clock-ins alone never prove presence. Door-controller integration is not connected, so presence is confirmed only by staff observation. Unknown is never shown as safe or absent.</p><div class="row"><button class="btn sm" id="em">Start emergency roll-call</button><span id="emn" class="crit"></span></div><div class="wrap" id="roll"></div></div>
+<div class="panel" data-r="SA SO RC"><h2>Visitors</h2><div class="row"><input id="vn" placeholder="Visitor name" aria-label="Visitor name"><select id="vh" aria-label="Host"></select><button class="btn primary sm" id="va">Register appointment</button></div><div class="row"><input id="vr" placeholder="Reason (extend / resolve, min 5 chars)" style="flex:1" aria-label="Reason"></div><div class="wrap" id="vis"></div></div>
+<div class="panel" data-r="SA SO RC"><h2>Security alerts</h2><div id="alerts"></div></div>
+<div class="panel" data-r="SA HR SO AU DM"><h2>Attendance events</h2><div class="wrap" id="att"></div></div>
+<div class="panel" data-r="SA SO AU" style="grid-column:1/-1"><h2>Tamper-evident audit trail</h2><div class="row"><button class="btn sm" id="ver">Verify chain</button><button class="btn sm red" id="tam">Test tamper detection</button><span id="vres"></span></div><div class="wrap" id="log"></div></div>
+</div><p class="mu hide" id="nop">This role has no access to any console panel in this prototype. Employee self-service needs sign-in, which is not built yet.</p></section>
+
+<section id="blueprint" class="hide"><div class="grid">
+<div class="panel"><h2>Modules</h2><ul><li>Kiosk UI: thin client, no stored secrets, offline queue marked <i>offline</i>.</li><li>Identity and enrolment: HR enrols; templates in an HSM/KMS-wrapped vault; no raw images kept beyond verification.</li><li>Attendance: append-only events with idempotency keys and a server-side clock.</li><li>Visitor and appointment: state machine with timers computed from stored check-in time.</li><li>Occupancy reconciliation: derives status from evidence, source and age.</li><li>Notification and escalation: SMS/email/push with delivery and acknowledgement receipts.</li><li>Admin dashboard, AuthN/AuthZ/audit (OIDC, MFA for privileged roles, server-side RBAC, hash-chained log).</li><li>Biometric adapter: vendor-neutral interface (enrol, verify, liveness score); measured error rates required before go-live.</li><li>Data: PostgreSQL, WAL archiving, encrypted backups.</li></ul></div>
+<div class="panel"><h2>Data model</h2><pre>employee(id, code_hash, legal_name, dept_id, role, status, enrolled_at, enrolled_by)
+biometric_ref(id, employee_id, kind, vault_key_id, lawful_basis, retention_until)
+attendance_event(id, employee_id, type[in|out|rejected|duplicate|manual], at_utc,
+  verification[face|face+voice|manual], score_band, offline bool, idem_key UNIQUE, corrects_id)
+visitor(id, name, contact_min) ; appointment(id, visitor_id, host_id, dept_id, starts_at,
+  duration_min=30, status, checkin_at, checkout_at, expires_at, extended_by, ext_reason)
+presence_evidence(id, subject_type, subject_id, source, at_utc)
+alert(id, kind, severity, ref_id, raised_at, ack_by, ack_at, resolved_by, res_note)
+audit_log(seq, at_utc, actor_id, action, detail, prev_hash, hash)
+role_grant(user_id, role, granted_by, at_utc)</pre></div>
+<div class="panel"><h2>Workflows</h2><ul><li><b>Arrival:</b> code, active check, face and liveness, optional voice, record only on success, greet by name. Uncertain or failed: manual verification by staff. Three failures lock the code and raise an alert.</li><li><b>Visit:</b> scheduled, checked in (timer from actual check-in), warning at T-5, expired, overdue with departure unconfirmed, alert, acknowledged, then extended with reason, checked out, or resolved with documented evidence. Expiry never implies departure.</li><li><b>Reconciliation:</b> confirmed present needs door/sensor evidence under 15 min old; clock-in only is last recorded present; clock-out or exit event is departure confirmed; anything else is unknown or discrepancy.</li></ul></div>
+<div class="panel"><h2>Test cases</h2><div class="wrap"><table><tr><th>Scenario</th><th>Expected</th></tr>
+<tr><td>Valid code, face match</td><td>Clock-in with timestamp, greeted by name</td></tr>
+<tr><td>Unknown or suspended code</td><td>Generic refusal, rejected event logged</td></tr>
+<tr><td>Spoof detected / uncertain</td><td>No attendance, manual route</td></tr>
+<tr><td>Three failed attempts</td><td>Lockout, alert, audit entry</td></tr>
+<tr><td>Double submit</td><td>Second logged as duplicate, one event</td></tr>
+<tr><td>Visitor reaches T-5 / T-0</td><td>Warning, then overdue, unresolved, alert</td></tr>
+<tr><td>Extend without reason</td><td>Refused</td></tr>
+<tr><td>Offline kiosk</td><td>Queued, flagged offline, reconciled on sync</td></tr>
+<tr><td>Emergency roll-call</td><td>Every person shows source and age; unknown stays unknown</td></tr>
+<tr><td>Edit an audit row</td><td>Chain verification fails at that sequence</td></tr>
+<tr><td>Auditor attempts action</td><td>Server denies and logs</td></tr></table></div></div>
+<div class="panel"><h2>Deployment, privacy, recovery</h2><ul><li><b>POPIA:</b> complete a privacy impact assessment and lawful-basis decision first; biometrics are special personal information, so document necessity and less intrusive alternatives; offer a non-biometric path; notices, retention schedule, access/correction, incident and complaint procedures; legal review of any consent assumptions.</li><li><b>Security:</b> TLS 1.2+, mTLS for kiosks, secrets in a vault, rate limits, step-up MFA, least-privilege RBAC, pen-test before launch.</li><li><b>Reliability:</b> daily encrypted backups, tested restores, RPO 15 min / RTO 1 h targets, paper roll-call and manual sign-in during outages, offline records flagged.</li><li><b>Hardware:</b> liveness-capable camera, door-controller API, UPS, tamper switch. Pilot to measure false accept and false reject rates before relying on any biometric.</li></ul></div>
+</div></section>
+</main>
+<footer>PixelProTech Solutions (Pty) Ltd · Reg 2026/622131/07 · pixelprotechsolutions.co.za · pixelprotechsolutions@proton.me · 065 197 1461</footer>
+<script src="app.js"></script></body></html>
